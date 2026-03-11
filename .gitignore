@@ -1,0 +1,33 @@
+# Environment — never commit secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Logs — audit logs may contain session metadata
+logs/
+
+# Database (no DB in v2, but just in case)
+*.db
+*.sqlite
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/

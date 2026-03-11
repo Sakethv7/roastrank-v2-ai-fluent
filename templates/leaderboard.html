@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-black text-white">
+<head>
+  <meta charset="UTF-8">
+  <title>RoastRank v2 — Session Leaderboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;900&display=swap" rel="stylesheet">
+  <script src="/static/starfield.js"></script>
+  <style>
+    body { font-family: 'Roboto Mono', monospace; }
+    #starfield { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+  </style>
+</head>
+
+<body>
+  <canvas id="starfield"></canvas>
+
+  <main class="relative z-10 max-w-3xl mx-auto px-6 pt-16 pb-28">
+
+    <h1 class="text-5xl font-black mb-2 text-center" style="font-family: 'Orbitron'; text-shadow: 0 0 14px gold;">
+      LEADERBOARD
+    </h1>
+
+    <!-- DILIGENCE: Session-only disclosure -->
+    <div class="mb-8 bg-blue-900/20 border border-blue-700/40 rounded-lg px-4 py-3 text-xs text-blue-300 text-center">
+      <p class="font-bold mb-1">🔒 SESSION-ONLY DATA</p>
+      <p>This leaderboard shows <strong>{{ count }} result(s)</strong> from the current server session only. All data is held in memory — no resume content or personal information is stored to disk. Results are cleared on server restart.</p>
+    </div>
+
+    {% if results %}
+    <div class="space-y-4">
+      {% for r in results %}
+      <div class="bg-gray-900/50 p-5 rounded-lg border {% if r.has_warnings %}border-orange-800/50{% else %}border-gray-800{% endif %}">
+        <div class="flex justify-between items-start mb-1">
+          <p class="font-bold text-yellow-300 text-xl">{{ r.score }}/100
+            <span class="text-xs text-gray-500 font-normal ml-2">{{ r.band_label if r.band_label is defined else "" }}</span>
+          </p>
+          <div class="flex items-center gap-2">
+            {% if r.has_warnings %}
+            <span class="text-xs text-orange-400 bg-orange-900/30 px-2 py-0.5 rounded">⚠ warnings</span>
+            {% endif %}
+            <span class="text-xs text-gray-500">{{ r.confidence_pct }} confidence</span>
+          </div>
+        </div>
+        <p class="text-white font-semibold">{{ r.name }}</p>
+        <p class="text-gray-300 mt-1 text-sm">{{ r.one_line }}</p>
+        <p class="text-gray-600 text-xs mt-2">{{ r.created_at }} · {{ r.mode }} mode</p>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center text-gray-500 py-20">
+      <p class="text-2xl mb-3">🌌</p>
+      <p>No roasts yet this session.</p>
+      <p class="text-sm mt-2">Upload a resume to get started.</p>
+    </div>
+    {% endif %}
+
+    <div class="mt-10 text-center">
+      <a href="/" class="underline hover:text-yellow-300 text-sm">← Back home</a>
+    </div>
+
+  </main>
+
+  <script>window.onload = () => startStarfield();</script>
+</body>
+</html>

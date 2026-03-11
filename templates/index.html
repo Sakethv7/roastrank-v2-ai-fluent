@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-black text-white overflow-x-hidden">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RoastRank v2 — AI-Fluent Edition</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Roboto+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="/static/starfield.js"></script>
+  <style>
+    body { font-family: 'Roboto Mono', monospace; overflow-x: hidden; }
+    #starfield { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; }
+    #intro { font-family: 'Orbitron', sans-serif; opacity: 0; animation: fadeIn 2.8s ease-out forwards; text-shadow: 0 0 16px rgba(255,255,255,0.7); }
+    @keyframes fadeIn { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
+    .mode-btn { transition: 0.25s ease; padding: 0.7rem 1.3rem; border-radius: 0.7rem; border: 2px solid transparent; font-weight: 700; }
+    .mode-btn.selected { transform: scale(1.05); border-color: gold; box-shadow: 0 0 12px rgba(255,215,0,0.55); }
+    .upload-area { border: 2px dashed rgba(255,255,255,0.25); padding: 2rem; border-radius: 1rem; cursor: pointer; transition: 0.25s; text-align: center; }
+    .upload-area:hover { border-color: gold; background: rgba(255,255,255,0.07); transform: translateY(-2px); }
+    .spinner { border: 4px solid rgba(255,255,255,0.15); border-top: 4px solid gold; border-radius: 50%; width: 34px; height: 34px; animation: spin 0.7s linear infinite; margin: auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+
+<body class="relative min-h-screen flex flex-col items-center">
+  <canvas id="starfield"></canvas>
+
+  <main class="relative z-10 w-full max-w-2xl mx-auto px-6 pt-20 pb-20 text-center">
+
+    <!-- DILIGENCE: AI Disclosure Notice -->
+    <div class="mb-6 bg-yellow-900/30 border border-yellow-600/50 rounded-lg px-4 py-3 text-left text-xs text-yellow-300">
+      <p class="font-bold mb-1">⚠ AI DISCLOSURE</p>
+      <p>This tool uses Claude (Anthropic) to generate resume feedback. Output is for entertainment and self-reflection only — not professional career advice. AI scores may reflect biases present in training data. See <a href="/limitations" class="underline hover:text-yellow-100">LIMITATIONS</a> for details.</p>
+    </div>
+
+    <p id="intro" class="text-lg mb-6 opacity-80">From a galaxy far, far away… your CV awaits judgment.</p>
+
+    <h1 class="text-5xl sm:text-6xl font-black mb-2" style="font-family: 'Orbitron', sans-serif; text-shadow: 0 0 14px gold;">
+      ROASTRANK
+    </h1>
+    <p class="text-yellow-500 text-xs mb-2 font-semibold tracking-widest">v2 · AI-FLUENT EDITION</p>
+    <p class="text-gray-300 mb-10">Upload your CV. Face the council. Survive if you can.</p>
+
+    <!-- Mode selector -->
+    <div class="flex justify-center gap-4 mb-6">
+      <button id="quickBtn" class="mode-btn selected bg-yellow-600 text-black" onclick="setMode('quick')">
+        ⚡ Quick Roast
+      </button>
+      <button id="fullBtn" class="mode-btn bg-red-700" onclick="setMode('full')">
+        🔥 Full Roast
+      </button>
+    </div>
+
+    <p id="modeWarning" class="text-sm text-yellow-400 mb-6">Fast, punchy and brutal.</p>
+
+    <!-- Upload form -->
+    <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+      <input type="hidden" id="modeInput" name="mode" value="quick">
+
+      <label class="upload-area block">
+        <p class="mb-3 text-gray-200">Click to upload your resume</p>
+        <p class="text-xs text-gray-400">PDF, DOCX, TXT — max 4,000 characters analyzed</p>
+        <input type="file" name="file" accept=".pdf,.docx,.txt" class="hidden" onchange="submitForm()">
+      </label>
+
+      <div id="loading" class="hidden mt-5">
+        <div class="spinner mb-2"></div>
+        <p class="text-sm text-gray-300">Claude is reading your resume…</p>
+        <p class="text-xs text-gray-500 mt-1">Running DELEGATION → DESCRIPTION → DISCERNMENT pipeline</p>
+      </div>
+    </form>
+
+    <!-- 4D Framework info -->
+    <div class="mt-10 bg-gray-900/40 border border-gray-700 rounded-lg px-5 py-4 text-left text-xs text-gray-400">
+      <p class="font-bold text-gray-300 mb-2">🔬 Responsible AI Features (4D Framework)</p>
+      <ul class="space-y-1">
+        <li><span class="text-blue-400">DELEGATION</span> — Human rubric in <code>rubric.py</code> drives all scoring. AI applies judgment, not criteria.</li>
+        <li><span class="text-green-400">DESCRIPTION</span> — Structured prompts with few-shot examples in <code>prompts/</code> folder.</li>
+        <li><span class="text-yellow-400">DISCERNMENT</span> — <code>validator.py</code> checks every response for generic output and hallucination signals before display.</li>
+        <li><span class="text-red-400">DILIGENCE</span> — Session-only storage. All results are cleared on server restart. All AI calls are logged.</li>
+      </ul>
+    </div>
+
+    <div class="mt-8 flex justify-center gap-6 text-sm text-gray-400">
+      <a href="/leaderboard" class="underline hover:text-yellow-300">View Session Leaderboard →</a>
+    </div>
+
+  </main>
+
+  <script>
+    function setMode(mode) {
+      document.getElementById("modeInput").value = mode;
+      document.getElementById("quickBtn").classList.remove("selected");
+      document.getElementById("fullBtn").classList.remove("selected");
+      if (mode === "quick") {
+        document.getElementById("quickBtn").classList.add("selected");
+        document.getElementById("modeWarning").innerText = "Fast, punchy and brutal.";
+      } else {
+        document.getElementById("fullBtn").classList.add("selected");
+        document.getElementById("modeWarning").innerText = "Full roast: all four rubric dimensions analyzed.";
+      }
+    }
+
+    function submitForm() {
+      document.getElementById("loading").classList.remove("hidden");
+      document.getElementById("uploadForm").submit();
+    }
+
+    window.onload = () => startStarfield();
+  </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-multipart
+jinja2
+python-dotenv
+PyPDF2
+python-docx
+anthropic>=0.40.0
