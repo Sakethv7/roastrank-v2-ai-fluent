@@ -1,3 +1,13 @@
+---
+title: RoastRank v2
+emoji: "🔥"
+colorFrom: red
+colorTo: orange
+sdk: docker
+app_file: main.py
+pinned: false
+---
+
 # RoastRank v2 — AI-Fluent Edition
 
 **Portfolio showcase of responsible AI development using the 4D Framework**

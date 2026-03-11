@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: roastrank-v2
+    runtime: docker
+    plan: free
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false   # Set manually in Render dashboard — never hardcode
+    healthCheckPath: /health
