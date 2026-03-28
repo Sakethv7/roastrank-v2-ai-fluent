@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from rubric import get_band
+
 
 @dataclass
 class RoastResult:
@@ -47,6 +49,11 @@ class RoastResult:
     created_at: str = field(
         default_factory=lambda: datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     )
+
+    @property
+    def band_label(self) -> str:
+        """Human-defined score band label (e.g. 'Solid'). Computed from rubric.py."""
+        return get_band(self.score).label
 
     @property
     def has_warnings(self) -> bool:

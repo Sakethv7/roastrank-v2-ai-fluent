@@ -28,6 +28,8 @@
 #      levels: (a) this prompt, (b) the API's output_config JSON schema,
 #      (c) validator.py post-hoc checking.
 
+import re
+
 from rubric import rubric_summary
 
 
@@ -86,24 +88,144 @@ _OUTPUT_SCHEMA = """
 """
 
 
+def _scan_residual_flags(resume_text: str) -> str:
+    """
+    Stage 2 of the two-stage prompt pipeline — the QJL residual layer.
+
+    TurboQuant analogy:
+      Stage 1 (rubric_summary = PolarQuant core): full rubric injected at
+        high fidelity — every dimension, weight, and flag definition.
+      Stage 2 (this function = QJL residual): a 1-bit signal per rubric
+        dimension based on what was actually detected in THIS resume.
+
+    The QJL transform in TurboQuant takes the compression residual, projects
+    it through a random Gaussian matrix, and stores just the sign (+1 / -1)
+    of each projection — enough to eliminate bias without memory overhead.
+
+    Here: we scan for known rubric flag patterns and return a compact
+    "attention residual" block — a binary active/inactive signal per dimension.
+    This pre-anchors Claude's attention to the real patterns in the text
+    instead of recapping the full rubric (Stage 1 already did that).
+
+    Result: fewer generic responses. Claude sees WHERE the evidence is before
+    it starts reasoning — reducing the attention equivalent of "quantization
+    bias" (generic output that ignores resume specifics).
+    """
+    text_lower = resume_text.lower()
+    flags: list[str] = []
+
+    # ── IMPACT dimension scan ─────────────────────────────────────────────────
+    weak_verbs = re.findall(
+        r"\b(helped|assisted|worked on|supported|participated|involved in|contributed to)\b",
+        text_lower,
+    )
+    has_metrics = bool(re.search(
+        r"\b\d+\s*[%x×]\b|\$[\d,.]+|\b\d+\s*(users?|customers?|requests?|ms|seconds?|gb|tb|k\b)",
+        text_lower,
+    ))
+    if weak_verbs:
+        sample = sorted(set(weak_verbs))[:2]
+        flags.append(
+            f"[IMPACT ⚑] Weak verbs present: {', '.join(repr(v) for v in sample)}"
+            " — penalise unless surrounding context shows real ownership"
+        )
+    else:
+        flags.append("[IMPACT ✓] No passive ownership verbs detected")
+    if not has_metrics:
+        flags.append("[IMPACT ⚑] No quantified metrics found (no %, $, counts, latency figures)")
+
+    # ── SKILLS dimension scan ─────────────────────────────────────────────────
+    filler_skills = re.findall(
+        r"\b(microsoft\s+office|ms\s+office|excel|word|google\s+docs|google\s+sheets"
+        r"|email|teamwork|communication|time\s+management|interpersonal)\b",
+        text_lower,
+    )
+    if filler_skills:
+        sample = sorted(set(filler_skills))[:2]
+        flags.append(f"[SKILLS ⚑] Filler/soft skills listed: {', '.join(repr(s) for s in sample)}")
+    else:
+        flags.append("[SKILLS ✓] No obvious filler skills")
+
+    has_depth = bool(re.search(
+        r"\b(python|javascript|typescript|react|vue|angular|node|fastapi|django|flask"
+        r"|pytorch|tensorflow|keras|scikit|pandas|numpy|sql|postgres|mysql|redis"
+        r"|kafka|spark|airflow|kubernetes|docker|aws|gcp|azure|terraform|rust|go|java"
+        r"|c\+\+|swift|kotlin|llm|transformer|fine.tun)\b",
+        text_lower,
+    ))
+    if not has_depth:
+        flags.append("[SKILLS ⚑] No recognized technical stack detected")
+
+    # ── CLARITY dimension scan ────────────────────────────────────────────────
+    buzzwords = re.findall(
+        r"\b(results.driven|passionate|synergistic|dynamic|proactive|self.starter"
+        r"|go.getter|ninja|rockstar|guru|thought\s+leader|leverage|utilize|impactful"
+        r"|innovative|cutting.edge|world.class|best.in.class)\b",
+        text_lower,
+    )
+    if buzzwords:
+        sample = sorted(set(buzzwords))[:2]
+        flags.append(f"[CLARITY ⚑] Buzzwords detected: {', '.join(repr(b) for b in sample)}")
+    else:
+        flags.append("[CLARITY ✓] No buzzword clusters found")
+
+    # ── CREDIBILITY dimension scan ────────────────────────────────────────────
+    big_claims = re.findall(r"\b(led|managed|directed|oversaw)\s+(?:a\s+)?(?:team\s+of\s+)?(\d+)", text_lower)
+    if big_claims:
+        verb, size = big_claims[0]
+        n = int(size)
+        if n >= 15:
+            flags.append(
+                f"[CREDIBILITY ⚑] Large team claim: '{verb} {size} people'"
+                " — verify title/seniority matches this scope"
+            )
+        else:
+            flags.append(f"[CREDIBILITY ✓] Team size claim ({size}) is plausible")
+    else:
+        flags.append("[CREDIBILITY —] No explicit team-size claims found")
+
+    header = (
+        "=== STAGE 2: RESIDUAL ATTENTION FLAGS ===\n"
+        "Pre-scanned patterns in this resume. Use these as focused attention"
+        " anchors — they show WHERE the evidence is for each rubric dimension.\n"
+    )
+    return header + "\n".join(flags)
+
+
 def build_roast_prompt(resume_text: str, mode: str) -> str:
     """
     Build the full user-turn prompt for a resume roast.
 
-    DELEGATION: The rubric is injected from rubric.py at call time.
-      The AI never sees hardcoded scoring criteria — only what humans define.
+    Two-stage prompt pipeline (TurboQuant-inspired):
 
-    DESCRIPTION: Rubric + few-shot examples + chain-of-thought + schema
-      are all combined here into one structured, purposeful prompt.
+    STAGE 1 — Core rubric injection (PolarQuant analogue):
+      rubric_summary() injects the full human-defined scoring rubric at high
+      fidelity. This is the main compression — all four dimensions, weights,
+      red/green flags, score bands. Equivalent to the PolarQuant stage:
+      high-quality compression of the "what to evaluate" knowledge.
+
+    STAGE 2 — Residual flag scan (QJL residual analogue):
+      _scan_residual_flags() does a quick regex pass over the resume text
+      and returns a 1-bit active/inactive signal per rubric dimension.
+      This is the QJL residual layer — a tiny, targeted signal that tells
+      Claude WHERE the evidence is, eliminating "attention bias" (the tendency
+      to write generic output when specifics aren't surfaced early).
+
+    DELEGATION: rubric_summary() pulls human-defined criteria from rubric.py.
+    DESCRIPTION: Two-stage structure + few-shot + chain-of-thought + schema.
 
     Args:
-        resume_text: Extracted resume text (already truncated to MAX_TEXT_CHARS).
-        mode: 'quick' (punchy one-liner focus) or 'full' (comprehensive analysis).
+        resume_text: Extracted, block-quantized resume text.
+        mode: 'quick' (punchy one-liner focus) or 'full' (all four dimensions).
 
     Returns:
         A complete user-turn prompt string ready to send to the Claude API.
     """
-    rubric = rubric_summary()  # DELEGATION: pull human-defined criteria at runtime
+    # STAGE 1: Core rubric — high-fidelity compression of scoring knowledge
+    rubric = rubric_summary()
+
+    # STAGE 2: Residual attention flags — 1-bit signal per dimension
+    residual = _scan_residual_flags(resume_text)
 
     mode_instruction = (
         "Focus on the single most memorable flaw or strength. Be punchy."
@@ -130,5 +252,7 @@ Before writing your response, think through these steps:
 === RESUME TEXT ===
 {resume_text}
 === END RESUME ===
+
+{residual}
 
 {_OUTPUT_SCHEMA}"""

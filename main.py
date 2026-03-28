@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from rubric import get_band, MAX_TEXT_CHARS
+from extractor import extract_blocks
 from validator import validate_response
 from logger import log_ai_call, log_validation_event
 from session import RoastResult, new_session_id, save_result, get_all_results, result_count
@@ -121,7 +122,10 @@ def roast_resume(text: str, mode: str, session_id: str) -> dict:
         }
 
     # DELEGATION: rubric criteria are injected inside build_roast_prompt()
-    prompt = build_roast_prompt(text[:MAX_TEXT_CHARS], mode)
+    # Block-quantize the resume before sending: extract highest-signal sections
+    # within the character budget instead of naive truncation.
+    compressed = extract_blocks(text, MAX_TEXT_CHARS)
+    prompt = build_roast_prompt(compressed, mode)
 
     # DILIGENCE: log the request (input summary only — no raw resume text in logs)
     log_ai_call(
@@ -133,44 +137,49 @@ def roast_resume(text: str, mode: str, session_id: str) -> dict:
     )
 
     try:
-        # Stream the response to handle long inputs without timeout
-        # Use JSON schema structured output to guarantee parseable response
+        # Stream the response to handle long inputs without timeout.
+        # DESCRIPTION: Force structured output via the tools API — Claude must call
+        # "submit_roast" with exactly the schema fields we define. This is the
+        # officially supported way to get guaranteed JSON output from Claude.
+        # It acts as the third enforcement layer (after prompt + validator.py).
+        _ROAST_TOOL = {
+            "name": "submit_roast",
+            "description": "Submit the structured roast analysis result.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "one_line":   {"type": "string", "description": "One-line punchy verdict"},
+                    "overview":   {"type": "string", "description": "Multi-sentence rubric analysis"},
+                    "fun_obs":    {"type": "string", "description": "A funny, specific observation"},
+                    "score":      {"type": "integer", "description": "Score 1–100"},
+                    "confidence": {"type": "number", "description": "Self-reported confidence 0.0–1.0"},
+                },
+                "required": ["one_line", "overview", "fun_obs", "score", "confidence"],
+            },
+        }
+
         with client.messages.stream(
             model=MODEL,
             max_tokens=1000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
-            # DESCRIPTION: JSON schema constraint — enforces output structure at API level
-            # This is the third enforcement layer (after prompt instructions and validator.py)
-            extra_body={
-                "output_config": {
-                    "format": {
-                        "type": "json_schema",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "one_line":   {"type": "string"},
-                                "overview":   {"type": "string"},
-                                "fun_obs":    {"type": "string"},
-                                "score":      {"type": "integer"},
-                                "confidence": {"type": "number"},
-                            },
-                            "required": ["one_line", "overview", "fun_obs", "score", "confidence"],
-                            "additionalProperties": False,
-                        },
-                    }
-                }
-            },
+            tools=[_ROAST_TOOL],
+            tool_choice={"type": "tool", "name": "submit_roast"},
         ) as stream:
             response = stream.get_final_message()
 
-        raw_content = response.content[0].text
-
-        # Parse JSON — structured output makes this reliable but we still guard it
-        try:
-            data = json.loads(raw_content)
-        except json.JSONDecodeError:
-            # Fallback: try to extract JSON from text if model added explanation
+        # Extract structured output from the tool_use block
+        tool_block = next(
+            (b for b in response.content if getattr(b, "type", None) == "tool_use"),
+            None,
+        )
+        if tool_block:
+            data = tool_block.input  # Already a dict — no JSON parsing needed
+        else:
+            # Fallback: attempt to extract JSON from any text block
+            raw_content = next(
+                (b.text for b in response.content if hasattr(b, "text")), "{}"
+            )
             match = re.search(r"\{.*\}", raw_content, re.DOTALL)
             data = json.loads(match.group()) if match else {}
 
@@ -297,6 +306,21 @@ def leaderboard(request: Request):
         "request": request,
         "results": results,
         "count": result_count(),
+    })
+
+
+@app.get("/limitations", response_class=HTMLResponse)
+def limitations(request: Request):
+    """Serve LIMITATIONS.md as an HTML page. Transparency about AI failure modes."""
+    md_path = os.path.join(os.path.dirname(__file__), "LIMITATIONS.md")
+    try:
+        with open(md_path, encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        content = "LIMITATIONS.md not found."
+    return templates.TemplateResponse("limitations.html", {
+        "request": request,
+        "content": content,
     })
 
 
