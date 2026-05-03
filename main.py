@@ -49,8 +49,7 @@ if not api_key:
 
 client = anthropic.Anthropic(api_key=api_key)
 
-# claude-opus-4-6: most capable model — appropriate for nuanced resume analysis
-MODEL = "claude-opus-4-6"
+MODEL = "claude-sonnet-4-6"
 
 # ── File extraction ──────────────────────────────────────────────────────────
 def extract_text(file: UploadFile) -> str:
